@@ -1,3 +1,93 @@
 #!/usr/bin/env bash
 
-TEST=test ./tinytestlib
+TEST="" source tinytestlib
+
+# Who tests the testers?? Obviously, the testers themselves test the testers!!
+# FYI this whole file is tab-indented BECAUSE if you want heredocs with
+# variable substitution, you have to use tabs: 
+# https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#Here-Documents
+_tinytestlib_test() {
+	local stdout stderr ret
+	# test basic assert_equal success
+	assert_equal "test with spaces" "test with spaces"
+	assert_equal "\"quoted 'stuff'\"" "\"quoted 'stuff'\""
+	# test basic assert_not_equal success
+	assert_not_equal "a a" "b b"
+	# test basic assert_equal success by capturing the stdout, stderr and returncode
+	capture stdout stderr ret assert_equal "test with spaces" "test with spaces"
+	assert_equal "$stdout" "\e[32m.\e[0m" # ansi green .
+	assert_equal "$stderr" ""
+	assert_equal "$ret" "0"
+	# test basic assert_equal failure by capturing the stdout, stderr and returncode
+	capture stdout stderr ret assert_equal "good" "bad"
+	assert_equal "$stdout" "\e[31mF\e[0m" # ansi red F
+	assert_equal "$stderr" "\e[31massert_equal failure: values <good> and <bad> do not match\e[0m"
+	assert_equal "$ret" "1"
+	# test the hex encoder/decoder
+	local testencode testdecode teststring
+	teststring="hello"
+	testencode=$(hex_encode $teststring)
+	testdecode=$(hex_decode $testencode)
+	assert_equal "$teststring" "$testdecode"
+	# test success and failure assertions
+	assert_success ls
+	assert_failure ls thisfilebetternotexist
+}
+
+_tinytestlib_testsuite() {
+	local stdout stderr ret
+	capture stdout stderr ret _tinytestlib_test
+	echo -e $stdout
+	echo -en $stderr
+	# echo "ret: $ret"
+	if [[ "$stdout" =~ 'F' ]]; then
+		echo
+		red_text "Failure"
+		echo
+		return 1
+	elif [[ "$stdout" =~ '.' ]]; then
+		echo
+		green_text "Success"
+		echo
+		return 0
+	else
+		echo
+		yellow_text "Unknown; there appear to be no assertions"
+		echo
+		return 2
+	fi
+}
+
+if [ ! "${TEST:-}" ]; then
+	# set -x
+	# DO NOT exit on error
+	set +o errexit
+	_name_of_this_script=$(basename $0)
+	# echo "bash suite:"
+	bash <<-EOT
+		TEST=test source tinytestlib
+		TEST=test source ./$_name_of_this_script
+		TEST=test _tinytestlib_testsuite
+	EOT
+	bashret=$(shellboolean $?)
+
+	# zsh compatibility test commented-out for now.
+	# echo "zsh suite:"
+	# zsh << '  EOT'
+	#   TEST="" source tinytestlib
+	#   TEST=test _tinytestlib_testsuite
+	# EOT
+	# zshret=$(shellboolean $?)
+	# if [[ "$bashret" && "$zshret" ]] ; then
+	if [ "$bashret" = "0" ]; then
+		echo
+		green_text "Suite Success"
+		echo
+		exit 0
+	else
+		echo
+		red_text "Suite Failure"
+		echo
+		exit 1
+	fi
+fi
