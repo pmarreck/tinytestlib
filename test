@@ -70,6 +70,8 @@ if [ ! "${TEST:-}" ]; then
 	save_shellenv
 	# set -x
 	# DO NOT exit on error
+	# Also cause subshells, command substitutions etc. to inherit errexit setting
+	shopt -s inherit_errexit
 	set +o errexit
 	set +o pipefail
 	set -o nounset
