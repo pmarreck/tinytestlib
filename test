@@ -94,17 +94,17 @@ if [ ! "${TEST:-}" ]; then
 	#   TEST=test _tinytestlib_testsuite
 	# EOT
 	# zshret=$(shellboolean $?)
+	passed=$bashret
 	# if [[ "$bashret" && "$zshret" ]] ; then
 	if [ "$bashret" = "0" ]; then
 		echo
 		green_text "Suite Success"
 		echo
-		exit 0
 	else
 		echo
 		red_text "Suite Failure"
 		echo
-		exit 1
 	fi
 	restore_shellenv
+	exit $passed
 fi

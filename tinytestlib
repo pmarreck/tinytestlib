@@ -16,15 +16,13 @@ else
 fi
 
 save_shellenv() {
-  _prev_shopt=$(shopt -p)
-  _prev_set=$(set +o)
+  _prev_shell_opts=$(set +o; shopt -p;)
 }
 
 restore_shellenv() {
-  eval "$_prev_shopt"
-  eval "$_prev_set"
-  unset _prev_shopt
-  unset _prev_set
+  eval "$_prev_shell_opts"
+  # clean up after ourselves, don't want to pollute the ENV
+  unset _prev_shell_opts
 }
 
 # ANSI color helpers
