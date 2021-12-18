@@ -21,14 +21,22 @@ _tinytestlib_test() {
 	# test basic assert_equal failure by capturing the stdout, stderr and returncode
 	capture stdout stderr ret assert_equal "good" "bad"
 	assert_equal "$stdout" "\e[31mF\e[0m" # ansi red F
-	assert_equal "$stderr" "\e[31massert_equal failure: values <good> and <bad> do not match\e[0m"
+	assert_equal "$stderr" "\e[31mExpected: [ \"good\" == \"bad\" ]\e[0m"
 	assert_equal "$ret" "1"
 	# test the hex encoder/decoder
 	local testencode testdecode teststring
-	teststring="hello"
+	teststring="	hello🐈ü🦊ß🐵"
 	testencode=$(hex_encode $teststring)
 	testdecode=$(hex_decode $testencode)
 	assert_equal "$teststring" "$testdecode"
+	# test regex matching
+	teststring="	hello🐈ü🦊ß🐵"
+	assert_match "$teststring" "🐈"
+	# I have 3 cats... 2 is enough 😊
+	assert_no_match "$teststring" "🐈🐈"
+	# test more complex regex matching
+	rx="^[[:blank:]]+hello🐈ü🦊ß🐵$"
+	assert_match "$teststring" "$rx"
 	# test success and failure assertions
 	assert_success ls
 	assert_failure ls thisfilebetternotexist
@@ -40,28 +48,34 @@ _tinytestlib_testsuite() {
 	echo -e $stdout
 	echo -en $stderr
 	# echo "ret: $ret"
-	if [[ "$stdout" =~ 'F' ]]; then
+	if [[ "$stdout" =~ F ]]; then
 		echo
 		red_text "Failure"
 		echo
 		return 1
-	elif [[ "$stdout" =~ '.' ]]; then
+	elif [[ "$stdout" == "" ]]; then
+		echo
+		yellow_text "No assertions!"
+		echo
+		return 2
+	else
 		echo
 		green_text "Success"
 		echo
 		return 0
-	else
-		echo
-		yellow_text "Unknown; there appear to be no assertions"
-		echo
-		return 2
 	fi
 }
 
 if [ ! "${TEST:-}" ]; then
+	save_shellenv
 	# set -x
 	# DO NOT exit on error
 	set +o errexit
+	set +o pipefail
+	set -o nounset
+	if [ "$shell" = "bash" ]; then
+		set -o errtrace
+	fi
 	_name_of_this_script=$(basename $0)
 	# echo "bash suite:"
 	bash <<-EOT
@@ -90,4 +104,5 @@ if [ ! "${TEST:-}" ]; then
 		echo
 		exit 1
 	fi
+	restore_shellenv
 fi

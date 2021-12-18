@@ -15,11 +15,17 @@ else
    exit 1
 fi
 
-# Exit on error
-set -o errexit -o pipefail -o nounset
-if [ "$shell" = "bash" ]; then
-  set -o errtrace
-fi
+save_shellenv() {
+  _prev_shopt=$(shopt -p)
+  _prev_set=$(set +o)
+}
+
+restore_shellenv() {
+  eval "$_prev_shopt"
+  eval "$_prev_set"
+  unset _prev_shopt
+  unset _prev_set
+}
 
 # ANSI color helpers
 red_text() {
@@ -117,12 +123,40 @@ _compare() {
   # Wish it didn't have to fire up a subshell though; future tweak?
   arg1_enc=$(hex_encode $1)
   arg2_enc=$(hex_encode $2)
-  if [ "$arg1_enc" $comp_op "$arg2_enc" ]; then
+  local comparison_encoded comparison
+# echo "[[ \"$1\" $comp_op \"$2\" ]]" >&2
+  case $comp_op in
+    = | == )
+      comparison_encoded="[ \"$arg1_enc\" $comp_op \"$arg2_enc\" ]"
+      comparison="[ \"$1\" $comp_op \"$2\" ]"
+    ;;
+    != | !== )
+      comparison_encoded="[ \"$arg1_enc\" \!= \"$arg2_enc\" ]"
+      comparison="[ \"$1\" \!= \"$2\" ]"
+    ;;
+    =~ ) # can't do encoded regex comparisons, so just do a plaintext comparison
+      comparison_encoded="[[ \"$1\" =~ $2 ]]"
+      comparison="[[ \"$1\" =~ $2 ]]"
+    ;;
+    !=~ | !~ )
+      comparison_encoded="[[ ! \"$1\" =~ $2 ]]"
+      comparison="[[ ! \"$1\" =~ $2 ]]"
+    ;;
+    * ) 
+      echo "Unknown comparison operator: $comp_op" >&2
+      return 1
+    ;;
+  esac
+  # I don't really like eval'ing here, but it's the only way I could get it to work
+  # Since the arguments are already hex encoded, this should be safe
+  # echo "$comparison_encoded" >&2
+  eval "$comparison_encoded"
+  if [ $? -eq 0 ]; then
     green_text "."
     return 0
   else
     red_text "F"
-    red_text "assert_equal failure: values <$1> and <$2> do not match" >&2
+    red_text "Expected: $comparison" >&2
     echo "" >&2
     return 1
   fi
@@ -135,6 +169,16 @@ assert_equal() {
 
 assert_not_equal() {
   _compare "!=" "$1" "$2"
+  return $?
+}
+
+assert_match() {
+  _compare "=~" "$1" "$2"
+  return $?
+}
+
+assert_no_match() {
+  _compare "!~" "$1" "$2"
   return $?
 }
 
