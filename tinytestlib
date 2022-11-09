@@ -5,15 +5,15 @@
 # I eventually want to make it handle being run from either zsh or bash (and possibly
 # other shells), but for now, it's just bash.
 
-shell="sh"
-if [ -n "${ZSH_VERSION:-}" ]; then
-   shell="zsh"
-elif [ -n "${BASH_VERSION:-}" ]; then
-   shell="bash"
-else
-   echo "Unknown shell encountered" >&2
-   exit 1
-fi
+# shell="sh"
+# if [ -n "${ZSH_VERSION:-}" ]; then
+#    shell="zsh"
+# elif [ -n "${BASH_VERSION:-}" ]; then
+#    shell="bash"
+# else
+#    echo "Unknown shell encountered" >&2
+#    exit 1
+# fi
 
 save_shellenv() {
   _prev_shell_opts=$(set +o; shopt -p;)
@@ -89,25 +89,24 @@ capture() {
   _out_var="$1"; shift
   _err_var="$1"; shift
   _ret_var="$1"; shift
-  _out=""
-  _err=""
-  _ret=""
+
   # just a modification of some nutso magic I found online that captures stdout into $_out, stderr into $_err and return/status code into $_ret
   # WITHOUT opening files, because touching the filesystem unnecessarily is sad (slows down tests, etc)
+  # and WITH only running the command once.
   # Modified from an answer here and only works in bash 4+: https://stackoverflow.com/questions/13806626/capture-both-stdout-and-stderr-in-bash
   # . <({ _err=$({ _out=$("$@"); _ret="$?"; } 2>&1; declare -p _out _ret >&2); declare -p _err; } 2>&1)
   eval "$({ _err=$({ _out=$("$@"); _ret="$?"; } 2>&1; declare -p _out _ret >&2); declare -p _err; } 2>&1)"
 
   if [ $debugflag ]; then
-    yellow_text "\ncmd: $@" >&2
+    yellow_text "\ncmd: $*" >&2
     yellow_text "\nout: $_out" >&2
     yellow_text "\nerr: $_err" >&2
     yellow_text "\nret: $_ret\n" >&2
   fi
-  read $_out_var <<<$(printf "%b" "$_out")
-  read $_err_var <<<$(printf "%b" "$_err")
-  read $_ret_var <<<$(printf "%b" "$_ret")
-  # echo "ret inside capture for '$@': $_ret"
+  read -r "${_out_var?}" <<<"$(printf "%b" "$_out")"
+  read -r "${_err_var?}" <<<"$(printf "%b" "$_err")"
+  read -r "${_ret_var?}" <<<"$(printf "%b" "$_ret")"
+  # echo "ret inside capture for '$*': $_ret"
   return $_ret
 }
 
@@ -119,8 +118,8 @@ _compare() {
   # to tapdance around escaping, ANSI etc. issues, I just encode to hex and compare those.
   # This may or may not be necessary anymore, but it fixed issues in the past
   # Wish it didn't have to fire up a subshell though; future tweak?
-  arg1_enc=$(hex_encode $1)
-  arg2_enc=$(hex_encode $2)
+  arg1_enc=$(hex_encode "$1")
+  arg2_enc=$(hex_encode "$2")
   local comparison_encoded comparison
 # echo "[[ \"$1\" $comp_op \"$2\" ]]" >&2
   case $comp_op in
@@ -148,8 +147,8 @@ _compare() {
   # I don't really like eval'ing here, but it's the only way I could get it to work
   # Since the arguments are already hex encoded, this should be safe
   # echo "$comparison_encoded" >&2
-  eval "$comparison_encoded"
-  if [ $? -eq 0 ]; then
+  if eval "$comparison_encoded"; then
+  # if [ $? -eq 0 ]; then
     green_text "."
     return 0
   else
@@ -188,7 +187,7 @@ assert_success() {
     return 0
   else
     red_text "F"
-    red_text "assert_success failure: <$*>" >&2
+    yellow_text "assert_success failure: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret" >&2
     echo "" >&2
     return 1
   fi
@@ -202,7 +201,7 @@ assert_failure() {
     return 0
   else
     red_text "F"
-    red_text "asserted failure, but it actually succeeded: <$*>" >&2
+    yellow_text "asserted failure, but it actually succeeded: <$*>\nstdout: $stdout\nstderr: $stderr\nretcode: $ret" >&2
     echo "" >&2
     return 1
   fi

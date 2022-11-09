@@ -26,8 +26,8 @@ _tinytestlib_test() {
 	# test the hex encoder/decoder
 	local testencode testdecode teststring
 	teststring="	hello🐈ü🦊ß🐵"
-	testencode=$(hex_encode $teststring)
-	testdecode=$(hex_decode $testencode)
+	testencode=$(hex_encode "$teststring")
+	testdecode=$(hex_decode "$testencode")
 	assert_equal "$teststring" "$testdecode"
 	# test regex matching
 	teststring="	hello🐈ü🦊ß🐵"
@@ -38,15 +38,15 @@ _tinytestlib_test() {
 	rx="^[[:blank:]]+hello🐈ü🦊ß🐵$"
 	assert_match "$teststring" "$rx"
 	# test success and failure assertions
-	assert_success ls
-	assert_failure ls thisfilebetternotexist
+	assert_success date
+	assert_failure thisfilebetternotexist
 }
 
 _tinytestlib_testsuite() {
 	local stdout stderr ret
 	capture stdout stderr ret _tinytestlib_test
-	echo -e $stdout
-	echo -en $stderr
+	echo -e "$stdout"
+	echo -en "$stderr"
 	# echo "ret: $ret"
 	if [[ "$stdout" =~ F ]]; then
 		echo
@@ -75,10 +75,10 @@ if [ ! "${TEST:-}" ]; then
 	set +o errexit
 	set +o pipefail
 	set -o nounset
-	if [ "$shell" = "bash" ]; then
-		set -o errtrace
-	fi
-	_name_of_this_script=$(basename $0)
+	# if [ "$shell" = "bash" ]; then
+	set -o errtrace
+	# fi
+	_name_of_this_script=$(basename "$0")
 	# echo "bash suite:"
 	bash <<-EOT
 		TEST=test source tinytestlib
