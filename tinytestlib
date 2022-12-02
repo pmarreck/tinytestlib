@@ -112,32 +112,33 @@ capture() {
 
 # an encoding-agnostic way to do binary comparisons
 _compare() {
-  local comp_op arg1_enc arg2_enc
+  local comp_op arg1 arg2 arg1_enc arg2_enc
   comp_op="$1"
-  shift
+  arg1="$2"
+  arg2="$3"
   # to tapdance around escaping, ANSI etc. issues, I just encode to hex and compare those.
   # This may or may not be necessary anymore, but it fixed issues in the past
   # Wish it didn't have to fire up a subshell though; future tweak?
-  arg1_enc=$(hex_encode "$1")
-  arg2_enc=$(hex_encode "$2")
+  arg1_enc=$(hex_encode "$arg1")
+  arg2_enc=$(hex_encode "$arg2")
   local comparison_encoded comparison
-# echo "[[ \"$1\" $comp_op \"$2\" ]]" >&2
+# echo "[[ \"$arg1\" $comp_op \"$arg2\" ]]" >&2
   case $comp_op in
     = | == )
       comparison_encoded="[ \"$arg1_enc\" $comp_op \"$arg2_enc\" ]"
-      comparison="[ \"$1\" $comp_op \"$2\" ]"
+      comparison="[ \"$arg1\" $comp_op \"$arg2\" ]"
     ;;
     != | !== )
       comparison_encoded="[ \"$arg1_enc\" \!= \"$arg2_enc\" ]"
-      comparison="[ \"$1\" \!= \"$2\" ]"
+      comparison="[ \"$arg1\" \!= \"$arg2\" ]"
     ;;
     =~ ) # can't do encoded regex comparisons, so just do a plaintext comparison
-      comparison_encoded="[[ \"$1\" =~ $2 ]]"
-      comparison="[[ \"$1\" =~ $2 ]]"
+      comparison_encoded="[[ \"$arg1\" =~ $arg2 ]]"
+      comparison="[[ \"$arg1\" =~ $arg2 ]]"
     ;;
     !=~ | !~ )
-      comparison_encoded="[[ ! \"$1\" =~ $2 ]]"
-      comparison="[[ ! \"$1\" =~ $2 ]]"
+      comparison_encoded="[[ ! \"$arg1\" =~ $arg2 ]]"
+      comparison="[[ ! \"$arg1\" =~ $arg2 ]]"
     ;;
     * ) 
       echo "Unknown comparison operator: $comp_op" >&2
