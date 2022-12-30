@@ -40,6 +40,14 @@ _tinytestlib_test() {
 	# test success and failure assertions
 	assert_success date
 	assert_failure thisfilebetternotexist
+	# test generic "assert" call
+	assert "$teststring" == "	hello🐈ü🦊ß🐵"
+	assert "$teststring" = "	hello🐈ü🦊ß🐵"
+	assert "$teststring" !== "hello"
+	assert "$teststring" != "hello"
+	assert "$teststring" =~ "🐈"
+	assert "$teststring" !=~ "🐈🐈"
+	assert "$teststring" !~ "🐈🐈"
 }
 
 _tinytestlib_testsuite() {

@@ -160,6 +160,11 @@ _compare() {
   fi
 }
 
+assert() {
+  _compare "$2" "$1" "$3"
+  return $?
+}
+
 assert_equal() {
   _compare "==" "$1" "$2"
   return $?
