@@ -74,28 +74,34 @@ hex_decode() {
 #   'builtin' 'return' '__zrc[-21,-19]'
 # }
 
-# Captures stdout, stderr and return code of any command into the named variables.
+# Captures stdout, stderr and return code of any command into the named variables passed as arguments.
 capture() {
-  local _out_var _out _err_var _err _ret_var _ret debugflag
+  local _out_var _out _err_var _err _ret_var _ret cmd debugflag
   local debugflag=
   if [ "$1" = "--debug" ]; then
     debugflag=1
     shift
   fi
   if [ "$#" -lt 4 ]; then
-      echo "Usage: capture [--debug] <stdoutvarname> <stderrvarname> <returncodevarname> command [arg ...]"
+      echo "Usage: capture [--debug] <stdout-varname> <stderr-varname> <returncode-varname> command [arg ...]"
       return 1
   fi
   _out_var="$1"; shift
   _err_var="$1"; shift
   _ret_var="$1"; shift
 
+  # get any namespaced tinytestlib vars holding suite state so we can get any changes back out
+  local ttlvars=$(env | rg "^_?(ttl|TTL)_" | awk -F= '{print $1}')
+  [ $debugflag ] && echo -e $ttlvars
+
   # just a modification of some nutso magic I found online that captures stdout into $_out, stderr into $_err and return/status code into $_ret
   # WITHOUT opening files, because touching the filesystem unnecessarily is sad (slows down tests, etc)
   # and WITH only running the command once.
   # Modified from an answer here and only works in bash 4+: https://stackoverflow.com/questions/13806626/capture-both-stdout-and-stderr-in-bash
   # . <({ _err=$({ _out=$("$@"); _ret="$?"; } 2>&1; declare -p _out _ret >&2); declare -p _err; } 2>&1)
-  eval "$({ _err=$({ _out=$("$@"); _ret="$?"; } 2>&1; declare -p _out _ret >&2); declare -p _err; } 2>&1)"
+  cmd="$({ _err=$({ _out=$("$@"; declare -p $ttlvars >&3); _ret="$?"; } 2>&1; declare -p _out _ret >&2 3>&2); declare -p _err; } 2>&1 3>&1)"
+  [ $debugflag ] && echo -e "command run:\n$cmd"
+  eval "$cmd"
 
   if [ $debugflag ]; then
     yellow_text "\ncmd: $*" >&2
@@ -108,6 +114,11 @@ capture() {
   read -r "${_ret_var?}" <<<"$(printf "%b" "$_ret")"
   # echo "ret inside capture for '$*': $_ret"
   return $_ret
+}
+
+raise() {
+  red_text "$1" >&2
+  exit ${2:-1}
 }
 
 # an encoding-agnostic way to do binary comparisons
@@ -148,15 +159,60 @@ _compare() {
   # I don't really like eval'ing here, but it's the only way I could get it to work
   # Since the arguments are already hex encoded, this should be safe
   # echo "$comparison_encoded" >&2
+  [ "$TTL_COLLECTING_TESTDATA" = "true" ] && ((ttl_test_count++))
   if eval "$comparison_encoded"; then
-  # if [ $? -eq 0 ]; then
-    green_text "."
+    if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
+      ttl_abbreviated_output="$ttl_abbreviated_output$(green_text ".")"
+      return 0
+    fi
+  else
+    if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
+      ((ttl_fails++))
+      ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
+      ttl_errors="$ttl_errors\n$(red_text "Expected: $comparison" && echo)"
+      return 1
+    else
+      raise "Error. Expected: $comparison"
+    fi
+  fi
+}
+
+begin_test_suite() {
+  export TTL_COLLECTING_TESTDATA=true
+  export ttl_test_count=0
+  export ttl_fails=0
+  export ttl_abbreviated_output=""
+  export ttl_errors=""
+}
+
+_ttl_unset_vars() {
+  unset ttl_test_count
+  unset ttl_fails
+  unset ttl_abbreviated_output
+  unset ttl_errors
+}
+
+end_test_suite() {
+  unset TTL_COLLECTING_TESTDATA
+  echo
+  if [ $ttl_test_count = 0 ]; then
+    yellow_text "No assertions!"
+		echo
+    _ttl_unset_vars
+    return -1
+  fi
+  echo -e $ttl_abbreviated_output
+  echo "$ttl_test_count assertions"
+  if [ $ttl_fails = 0 ]; then
+    green_text "Success"
+    echo
+    _ttl_unset_vars
     return 0
   else
-    red_text "F"
-    red_text "Expected: $comparison" >&2
-    echo "" >&2
-    return 1
+    red_text "Failures: $ttl_fails"
+    echo -e $ttl_errors
+    echo
+    _ttl_unset_vars && return $ttl_fails
   fi
 }
 
@@ -186,40 +242,54 @@ assert_no_match() {
 }
 
 assert_success() {
+  [ "$TTL_COLLECTING_TESTDATA" = "true" ] && ((ttl_test_count++))
   local stdout stderr ret
   capture stdout stderr ret "$*"
   if [ "$ret" = "0" ]; then
-    green_text "."
-    return 0
+    if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
+      ttl_abbreviated_output="$ttl_abbreviated_output$(green_text ".")"
+      return 0
+    fi
   else
-    red_text "F"
-    yellow_text "assert_success failure: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret" >&2
-    echo "" >&2
-    return 1
+    if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
+      ((ttl_fails++))
+      ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
+      ttl_errors="$ttl_errors\n$(yellow_text "assert_success failure: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret" && echo)"
+      return 1
+    else
+      raise "assert_success failure: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret"
+    fi
   fi
 }
 
 assert_failure() {
+  [ "$TTL_COLLECTING_TESTDATA" = "true" ] && ((ttl_test_count++))
   local stdout stderr ret
   capture stdout stderr ret "$*"
   if [ "$ret" != "0" ]; then
-    green_text "."
-    return 0
+    if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
+      ttl_abbreviated_output="$ttl_abbreviated_output$(green_text ".")"
+      return 0
+    fi
   else
-    red_text "F"
-    yellow_text "asserted failure, but it actually succeeded: <$*>\nstdout: $stdout\nstderr: $stderr\nretcode: $ret" >&2
-    echo "" >&2
-    return 1
+    if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
+      ((ttl_fails++))
+      ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
+      ttl_errors="$ttl_errors\n$(yellow_text "assert_failure was actually successful: <$*>\nstdout: $stdout\nstderr: $stderr\nretcode: $ret" && echo)"
+      return 1
+    else
+      raise "assert_failure was actually successful: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret"
+    fi
   fi
 }
 
 # the point of this is to convert nonzero exit codes to blanks (false) and anything else to "0" ("true")
-shellboolean() {
-  if [ "$1" = "0" ]; then
-    echo -n "0"
-    return 0
-  else
-    echo -n ""
-    return $1
-  fi
-}
+# shellboolean() {
+#   if [ "$1" = "0" ]; then
+#     echo -n "0"
+#     return 0
+#   else
+#     echo -n ""
+#     return $1
+#   fi
+# }

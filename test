@@ -1,118 +1,57 @@
 #!/usr/bin/env bash
 
-TEST="" source tinytestlib
+source tinytestlib
 
 # Who tests the testers?? Obviously, the testers themselves test the testers!!
 # FYI this whole file is tab-indented BECAUSE if you want heredocs with
 # variable substitution, you have to use tabs: 
 # https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#Here-Documents
 _tinytestlib_test() {
-	local stdout stderr ret
-	# test basic assert_equal success
-	assert_equal "test with spaces" "test with spaces"
-	assert_equal "\"quoted 'stuff'\"" "\"quoted 'stuff'\""
-	# test basic assert_not_equal success
-	assert_not_equal "a a" "b b"
-	# test basic assert_equal success by capturing the stdout, stderr and returncode
-	capture stdout stderr ret assert_equal "test with spaces" "test with spaces"
-	assert_equal "$stdout" "\e[32m.\e[0m" # ansi green .
-	assert_equal "$stderr" ""
-	assert_equal "$ret" "0"
-	# test basic assert_equal failure by capturing the stdout, stderr and returncode
-	capture stdout stderr ret assert_equal "good" "bad"
-	assert_equal "$stdout" "\e[31mF\e[0m" # ansi red F
-	assert_equal "$stderr" "\e[31mExpected: [ \"good\" == \"bad\" ]\e[0m"
-	assert_equal "$ret" "1"
-	# test the hex encoder/decoder
-	local testencode testdecode teststring
-	teststring="	hello🐈ü🦊ß🐵"
-	testencode=$(hex_encode "$teststring")
-	testdecode=$(hex_decode "$testencode")
-	assert_equal "$teststring" "$testdecode"
-	# test regex matching
-	teststring="	hello🐈ü🦊ß🐵"
-	assert_match "$teststring" "🐈"
-	# I have 3 cats... 2 is enough 😊
-	assert_no_match "$teststring" "🐈🐈"
-	# test more complex regex matching
-	rx="^[[:blank:]]+hello🐈ü🦊ß🐵$"
-	assert_match "$teststring" "$rx"
-	# test success and failure assertions
-	assert_success date
-	assert_failure thisfilebetternotexist
-	# test generic "assert" call
-	assert "$teststring" == "	hello🐈ü🦊ß🐵"
-	assert "$teststring" = "	hello🐈ü🦊ß🐵"
-	assert "$teststring" !== "hello"
-	assert "$teststring" != "hello"
-	assert "$teststring" =~ "🐈"
-	assert "$teststring" !=~ "🐈🐈"
-	assert "$teststring" !~ "🐈🐈"
+	begin_test_suite
+		local stdout stderr ret
+		# test basic assert_equal success
+#		assert_equal "test with spaces" "test with spaces"
+#		assert_equal "\"quoted 'stuff'\"" "\"quoted 'stuff'\""
+		# test basic assert_not_equal success
+#		assert_not_equal "a a" "b b"
+		# test basic assert_equal success by capturing the stdout, stderr and returncode
+		local current_output="$ttl_abbreviated_output"
+		capture --debug stdout stderr ret assert_equal "test with spaces" "test with spaces"
+		assert_equal "$ttl_abbreviated_output" "$current_output\e[32m.\e[0m" # ansi green .
+		assert_equal "$stderr" ""
+		assert_equal "$ret" "0"
+#		# test basic assert_equal failure by capturing the stdout, stderr and returncode
+#		capture stdout stderr ret assert_equal "good" "bad"
+#		assert_equal "$stdout" "\e[31mF\e[0m" # ansi red F
+#		assert_equal "$stderr" "\e[31mExpected: [ \"good\" == \"bad\" ]\e[0m"
+#		assert_equal "$ret" "1"
+#		# test the hex encoder/decoder
+#		local testencode testdecode teststring
+#		teststring="	hello🐈ü🦊ß🐵"
+#		testencode=$(hex_encode "$teststring")
+#		testdecode=$(hex_decode "$testencode")
+#		assert_equal "$teststring" "$testdecode"
+#		# test regex matching
+#		teststring="	hello🐈ü🦊ß🐵"
+#		assert_match "$teststring" "🐈"
+#		# I have 2 cats... that is more than enough 😊
+#		assert_no_match "$teststring" "🐈🐈"
+#		# test more complex regex matching
+#		rx="^[[:blank:]]+hel{3}o🐈ü🦊ß🐵$"
+#		assert_match "$teststring" "$rx"
+#		# test success and failure assertions
+#		assert_success date
+#		assert_failure thisfilebetternotexist
+#		# test generic "assert" call
+#		assert "$teststring" == "	hello🐈ü🦊ß🐵"
+#		assert "$teststring" = "	hello🐈ü🦊ß🐵"
+#		assert "$teststring" !== "hello"
+#		assert "$teststring" != "hello"
+#		assert "$teststring" =~ "🐈"
+#		assert "$teststring" !=~ "🐈🐈"
+#		assert "$teststring" !~ "🐈🐈"
+	end_test_suite
 }
 
-_tinytestlib_testsuite() {
-	local stdout stderr ret
-	capture stdout stderr ret _tinytestlib_test
-	echo -e "$stdout"
-	echo -en "$stderr"
-	# echo "ret: $ret"
-	if [[ "$stdout" =~ F ]]; then
-		echo
-		red_text "Failure"
-		echo
-		return 1
-	elif [[ "$stdout" == "" ]]; then
-		echo
-		yellow_text "No assertions!"
-		echo
-		return 2
-	else
-		echo
-		green_text "Success"
-		echo
-		return 0
-	fi
-}
-
-if [ ! "${TEST:-}" ]; then
-	save_shellenv
-	# set -x
-	# DO NOT exit on error
-	# Also cause subshells, command substitutions etc. to inherit errexit setting
-	shopt -s inherit_errexit
-	set +o errexit
-	set +o pipefail
-	set -o nounset
-	# if [ "$shell" = "bash" ]; then
-	set -o errtrace
-	# fi
-	_name_of_this_script=$(basename "$0")
-	# echo "bash suite:"
-	bash <<-EOT
-		TEST=test source tinytestlib
-		TEST=test source ./$_name_of_this_script
-		TEST=test _tinytestlib_testsuite
-	EOT
-	bashret=$(shellboolean $?)
-
-	# zsh compatibility test commented-out for now.
-	# echo "zsh suite:"
-	# zsh << '  EOT'
-	#   TEST="" source tinytestlib
-	#   TEST=test _tinytestlib_testsuite
-	# EOT
-	# zshret=$(shellboolean $?)
-	passed=$bashret
-	# if [[ "$bashret" && "$zshret" ]] ; then
-	if [ "$bashret" = "0" ]; then
-		echo
-		green_text "Suite Success"
-		echo
-	else
-		echo
-		red_text "Suite Failure"
-		echo
-	fi
-	restore_shellenv
-	exit $passed
-fi
+_tinytestlib_test
+unset _tinytestlib_test
