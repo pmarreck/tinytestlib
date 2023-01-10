@@ -5,16 +5,6 @@
 # I eventually want to make it handle being run from either zsh or bash (and possibly
 # other shells), but for now, it's just bash.
 
-# shell="sh"
-# if [ -n "${ZSH_VERSION:-}" ]; then
-#    shell="zsh"
-# elif [ -n "${BASH_VERSION:-}" ]; then
-#    shell="bash"
-# else
-#    echo "Unknown shell encountered" >&2
-#    exit 1
-# fi
-
 save_shellenv() {
   _prev_shell_opts=$(set +o; shopt -p;)
 }
@@ -56,66 +46,54 @@ hex_decode() {
   posixy_echo_no_newline "$*" | xxd -r -p
 }
 
-# a zsh way to capture all of stdout, stderr and return
-# printf 'status: %s\nstdout: %s\nstderr: %s\n' $? "${(q+)reply[@]}"
-# Still being tested, so commented-out for now
-# zsh-capture() {
-#   'builtin' 'local' '__zrc'
-#   __zrc="$(
-#     __zrc="$( ("$@") || __zrc="$?"; 'builtin' 'printf' '%3d' "$__zrc")" 2>&1 ||
-#       'builtin' 'printf' '-v' '__zrc' '%3d' "$?"
-#     'builtin' 'unsetopt' 'multibyte'
-#     'builtin' 'printf' '%s%18d' "$__zrc" "${#__zrc}"
-#   )" || 'builtin' 'printf' '-v' '__zrc' '%3d%18d' "$?" '3'
-#   'builtin' 'emulate' '-L' 'zsh' '-o' 'no_multibyte'
-#   'builtin' 'local' '-i' n='__zrc[-18,-1]'
-#   'builtin' 'typeset' '-ga' 'reply'
-#   'builtin' 'set' '-A' 'reply' "$__zrc[-n-18,-22]" "$__zrc[1,-n-19]"
-#   'builtin' 'return' '__zrc[-21,-19]'
-# }
-
-# Captures stdout, stderr and return code of any command into the named variables passed as arguments.
+# Captures stdout, stderr and return code of any command into the named variable (a 'declare -A var' variable name) passed as an argument.
 capture() {
-  local _out_var _out _err_var _err _ret_var _ret cmd debugflag
-  local debugflag=
+  local _out _err _ret
   if [ "$1" = "--debug" ]; then
-    debugflag=1
+    local debugflag=1
     shift
   fi
-  if [ "$#" -lt 4 ]; then
-      echo "Usage: capture [--debug] <stdout-varname> <stderr-varname> <returncode-varname> command [arg ...]"
+  # So this is a "name reference" (bash 4.5+). Any references to this name here will actually refer to the passed-in name on $1.
+  # Which should be declared in that scope as `declare -A` (associative array/dictionary).
+  local aa_alias=$1
+  declare -n outs_dict=$1
+  shift
+  # check to make sure we were given an associative array
+  if is_associative_array $aa_alias; then
+    : # we're fine (colon is a "no-op" in Bash. TYL.)
+  else
+    raise "Error: $aa_alias is not an associative array (that is, declared via 'declare -A $aa_alias')"
+  fi
+
+  if [ "$#" -lt 1 ]; then
+      echo "Usage: capture [--debug] <outputs-dict-varname> command [arg ...]"
+      echo "The <outputs-dict-varname> is any variable defined as \`declare -A\`"
+      echo "The stdout, stderr and retval can be accessed via (assuming it's named \"outs\"):"
+      echo '${outs[stdout]}, ${outs[stderr]} and ${outs[retval]}.'
       return 1
   fi
-  _out_var="$1"; shift
-  _err_var="$1"; shift
-  _ret_var="$1"; shift
-
-  # get any namespaced tinytestlib vars holding suite state so we can get any changes back out
-  local ttlvars=$(env | rg "^_?(ttl|TTL)_" | awk -F= '{print $1}')
-  [ $debugflag ] && echo -e $ttlvars
 
   # just a modification of some nutso magic I found online that captures stdout into $_out, stderr into $_err and return/status code into $_ret
+  # (along with any special ttl-namespaced vars which might have changed)
   # WITHOUT opening files, because touching the filesystem unnecessarily is sad (slows down tests, etc)
   # and WITH only running the command once.
   # Modified from an answer here and only works in bash 4+: https://stackoverflow.com/questions/13806626/capture-both-stdout-and-stderr-in-bash
-  # . <({ _err=$({ _out=$("$@"); _ret="$?"; } 2>&1; declare -p _out _ret >&2); declare -p _err; } 2>&1)
-  cmd="$({ _err=$({ _out=$("$@"; declare -p $ttlvars >&3); _ret="$?"; } 2>&1; declare -p _out _ret >&2 3>&2); declare -p _err; } 2>&1 3>&1)"
-  [ $debugflag ] && echo -e "command run:\n$cmd"
-  eval "$cmd"
+  . <({ _err=$({ _out=$("$@"); _ret="$?"; } 2>&1; declare -p _out _ret >&2); declare -p _err; } 2>&1)
 
-  if [ $debugflag ]; then
+  if [[ -v debugflag ]]; then
     yellow_text "\ncmd: $*" >&2
     yellow_text "\nout: $_out" >&2
     yellow_text "\nerr: $_err" >&2
     yellow_text "\nret: $_ret\n" >&2
   fi
-  read -r "${_out_var?}" <<<"$(printf "%b" "$_out")"
-  read -r "${_err_var?}" <<<"$(printf "%b" "$_err")"
-  read -r "${_ret_var?}" <<<"$(printf "%b" "$_ret")"
-  # echo "ret inside capture for '$*': $_ret"
+  outs_dict[stdout]="$(printf "%b" "$_out")"
+  outs_dict[stderr]="$(printf "%b" "$_err")"
+  outs_dict[retval]="$(printf "%b" "$_ret")"
+  unset -n outs_dict # unsets the *name reference*, NOT the variable referenced by the name
   return $_ret
 }
 
+# exit with red text to stderr
 raise() {
   red_text "$1" >&2
   exit ${2:-1}
@@ -133,7 +111,6 @@ _compare() {
   arg1_enc=$(hex_encode "$arg1")
   arg2_enc=$(hex_encode "$arg2")
   local comparison_encoded comparison
-# echo "[[ \"$arg1\" $comp_op \"$arg2\" ]]" >&2
   case $comp_op in
     = | == )
       comparison_encoded="[ \"$arg1_enc\" $comp_op \"$arg2_enc\" ]"
@@ -199,7 +176,7 @@ end_test_suite() {
     yellow_text "No assertions!"
 		echo
     _ttl_unset_vars
-    return -1
+    return 1
   fi
   echo -e $ttl_abbreviated_output
   echo "$ttl_test_count assertions"
@@ -210,7 +187,7 @@ end_test_suite() {
     return 0
   else
     red_text "Failures: $ttl_fails"
-    echo -e $ttl_errors
+    echo -e "$ttl_errors"
     echo
     _ttl_unset_vars && return $ttl_fails
   fi
@@ -241,11 +218,77 @@ assert_no_match() {
   return $?
 }
 
+is_array() {
+  local declaredtype=$(declare -p "$1" 2>/dev/null | awk '{print $2}')
+  case "$declaredtype" in
+  -a)
+    return 0
+    ;;
+  *)
+    return 1
+    ;;
+  esac
+}
+
+is_associative_array() {
+  local declaredtype=$(declare -p "$1" 2>/dev/null | awk '{print $2}')
+  case "$declaredtype" in
+  -A)
+    return 0
+    ;;
+  *)
+    return 1
+    ;;
+  esac
+}
+
+# currently only works with 1 type applied at a time
+assert_type() {
+  local vartype=$1
+  local varname=$2
+  local declaredtype=$(declare -p "$varname" | awk '{print $2}')
+  case "$declaredtype" in
+  -A)
+    assert_equal "associative_array" "$vartype"
+    ;;
+  --)
+    assert_equal "string" "$vartype"
+    ;;
+  -a)
+    assert_equal "array" "$vartype"
+    ;;
+  -i)
+    assert_equal "integer" "$vartype"
+    ;;
+  -r)
+    assert_equal "readonly" "$vartype"
+    ;;
+  -x)
+    assert_equal "exported" "$vartype"
+    ;;
+  *)
+    raise "Type assertion expected $1 for $2 but declare gave $declaredtype which is currently undefined"
+    ;;
+  esac
+}
+
+strip_ansi() {
+  local ansiregex="s/[\x1b\x9b]\[([0-9]{1,4}(;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]//g"
+  # Take stdin if it's there; otherwise expect arguments.
+  # The following exits code 0 if stdin not empty; 1 if empty; does not consume any bytes.
+  # This may only be a Bash-ism, FYI. Not sure if it's shell-portable.
+  if read -t 0; then # consume stdin
+    sed -E "$ansiregex"
+  else
+    posixy_echo_no_newline "$1" | sed -E "$ansiregex"
+  fi
+}
+
 assert_success() {
   [ "$TTL_COLLECTING_TESTDATA" = "true" ] && ((ttl_test_count++))
-  local stdout stderr ret
-  capture stdout stderr ret "$*"
-  if [ "$ret" = "0" ]; then
+  declare -A outs
+  capture outs "$@"
+  if [ "${outs[retval]}" = "0" ]; then
     if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
       ttl_abbreviated_output="$ttl_abbreviated_output$(green_text ".")"
       return 0
@@ -254,19 +297,19 @@ assert_success() {
     if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
       ((ttl_fails++))
       ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
-      ttl_errors="$ttl_errors\n$(yellow_text "assert_success failure: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret" && echo)"
+      ttl_errors="$ttl_errors\n$(yellow_text "assert_success failure: <$*>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}" && echo)"
       return 1
     else
-      raise "assert_success failure: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret"
+      raise "$(strip_ansi "assert_success failure: <$*>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}")"
     fi
   fi
 }
 
 assert_failure() {
   [ "$TTL_COLLECTING_TESTDATA" = "true" ] && ((ttl_test_count++))
-  local stdout stderr ret
-  capture stdout stderr ret "$*"
-  if [ "$ret" != "0" ]; then
+  declare -A outs
+  capture outs "$@"
+  if [ "${outs[retval]}" != "0" ]; then
     if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
       ttl_abbreviated_output="$ttl_abbreviated_output$(green_text ".")"
       return 0
@@ -275,21 +318,10 @@ assert_failure() {
     if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
       ((ttl_fails++))
       ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
-      ttl_errors="$ttl_errors\n$(yellow_text "assert_failure was actually successful: <$*>\nstdout: $stdout\nstderr: $stderr\nretcode: $ret" && echo)"
+      ttl_errors="$ttl_errors\n$(yellow_text "assert_failure was actually successful: <$*>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}" && echo)"
       return 1
     else
-      raise "assert_failure was actually successful: <$*>\n stdout: $stdout\n stderr: $stderr\nretcode: $ret"
+      raise "$(strip_ansi "assert_failure was actually successful: <$*>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}")"
     fi
   fi
 }
-
-# the point of this is to convert nonzero exit codes to blanks (false) and anything else to "0" ("true")
-# shellboolean() {
-#   if [ "$1" = "0" ]; then
-#     echo -n "0"
-#     return 0
-#   else
-#     echo -n ""
-#     return $1
-#   fi
-# }
