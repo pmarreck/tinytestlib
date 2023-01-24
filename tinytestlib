@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 
-# Tinytestlib:
+# github:pmarreck/tinytestlib
 # Because all the other solutions I found to do basic bash shell script testing were too large.
-# I eventually want to make it handle being run from either zsh or bash (and possibly
-# other shells), but for now, it's just bash.
 
 if (( BASH_VERSINFO < 4 )); then
   printf -- '[ERROR]: %s\n' "bash v4.x or higher required" >&2
@@ -20,10 +18,11 @@ restore_shellenv() {
   unset _prev_shell_opts
 }
 
-# Is this a TTY? Or, is one being faked for testing reasons?
-isatty() {
-  [[ -v FAKE_TTY ]] && return 0
-  [[ -t 0 && -t 1 ]] && return 0 || return 1
+# Is this a color TTY? Or, is one (or the lack of one) being faked for testing reasons?
+isacolortty() {
+  [[ -v FAKE_COLORTTY ]] && return 0
+  [[ -v FAKE_NOCOLORTTY ]] && return 1
+  [[ "$TERM" =~ 'color' ]] && return 0 || return 1
 }
 
 # echo has nonstandard behavior, so...
@@ -47,8 +46,8 @@ puts() {
     shift
   done
 
-  # If we're not interactive, override print_fmt and end_fmt to remove ansi
-  isatty || unset -v print_fmt end_fmt
+  # If we're not interactive/color, override print_fmt and end_fmt to remove ansi
+  isacolortty || unset -v print_fmt end_fmt
 
   # shellcheck disable=SC2059
   printf -- "${print_fmt}${print_spec}${end_fmt}${newline}" "${*}"
@@ -67,13 +66,34 @@ yellow_text() {
   puts --yellow -en "${1}"
 }
 
-hex_encode() {
-  puts -en "${*}" | hexdump -ve '/1 "%02x"'
+binhex() {
+  if [ -z "$1" ]; then
+    if read -t 0; then
+      xxd -pu;
+    else
+      echo "Encodes binary data to hexadecimal."
+      echo "Usage: binhex <string>";
+      echo "    (or pipe something to binhex)";
+      echo "This function is defined in ${BASH_SOURCE[0]}";
+    fi;
+  else
+    printf "%b" "$1" | xxd -pu;
+  fi
 }
 
-hex_decode() {
-  # note that using -rp instead of -r -p as args to xxd will FAIL! what's an option parser? ;)
-  puts -en "${*}" | xxd -r -p
+hexbin() {
+  if [ -z "$1" ]; then
+    if read -t 0; then
+      xxd -r -p;
+    else
+      echo "Decodes hexadecimal data to binary data."
+      echo "Usage: hexbin <hex string>";
+      echo "    (or pipe something to hexbin)";
+      echo "This function is defined in ${BASH_SOURCE[0]}";
+    fi;
+  else
+    printf "%b" "$1" | xxd -r -p;
+  fi
 }
 
 # Captures stdout, stderr and return code of any command into the named variable (a 'declare -A var' variable name) passed as an argument.
@@ -138,8 +158,8 @@ _compare() {
   # to tapdance around escaping, ANSI etc. issues, I just encode to hex and compare those.
   # This may or may not be necessary anymore, but it fixed issues in the past
   # Wish it didn't have to fire up a subshell though; future tweak?
-  arg1_enc=$(hex_encode "$arg1")
-  arg2_enc=$(hex_encode "$arg2")
+  arg1_enc=$(binhex "$arg1")
+  arg2_enc=$(binhex "$arg2")
   local comparison_encoded comparison
   case $comp_op in
     = | == )
@@ -151,12 +171,13 @@ _compare() {
       comparison="[ \"$arg1\" \!= \"$arg2\" ]"
     ;;
     =~ ) # can't do encoded regex comparisons, so just do a plaintext comparison
-      comparison_encoded="[[ \"$arg1\" =~ $arg2 ]]"
-      comparison="[[ \"$arg1\" =~ $arg2 ]]"
+      # See note about compat31 elsewhere in this file
+      comparison_encoded="[[ \"$arg1\" =~ \"$arg2\" ]]"
+      comparison="[[ \"$arg1\" =~ \"$arg2\" ]]"
     ;;
     !=~ | !~ )
-      comparison_encoded="[[ ! \"$arg1\" =~ $arg2 ]]"
-      comparison="[[ ! \"$arg1\" =~ $arg2 ]]"
+      comparison_encoded="[[ ! \"$arg1\" =~ \"$arg2\" ]]"
+      comparison="[[ ! \"$arg1\" =~ \"$arg2\" ]]"
     ;;
     * ) 
       echo "Unknown comparison operator: $comp_op" >&2
@@ -176,7 +197,8 @@ _compare() {
     if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
       ((ttl_fails++))
       ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
-      ttl_errors="$ttl_errors\n$(red_text "Expected: $comparison" && echo)"
+      [[ -v ASSERTION ]] && ttl_errors="$ttl_errors$(yellow_text "$ASSERTION")\n"
+      ttl_errors="$ttl_errors$(red_text "Expected: $comparison")\n"
       return 1
     else
       die "Error. Expected: $comparison"
@@ -190,6 +212,8 @@ begin_test_suite() {
   export ttl_fails=0
   export ttl_abbreviated_output=""
   export ttl_errors=""
+  save_shellenv
+  shopt -s compat31 # necessary for quoted regex matches on the RHS to work, see: http://ftp.gnu.org/gnu/bash/bash-3.2-patches/bash32-039
 }
 
 _ttl_unset_vars() {
@@ -201,6 +225,7 @@ _ttl_unset_vars() {
 
 end_test_suite() {
   unset TTL_COLLECTING_TESTDATA
+  restore_shellenv
   echo
   if [ $ttl_test_count = 0 ]; then
     yellow_text "No assertions!"
@@ -208,17 +233,16 @@ end_test_suite() {
     _ttl_unset_vars
     return 1
   fi
-  echo -e $ttl_abbreviated_output
-  echo "$ttl_test_count assertions"
+  puts -e "$ttl_abbreviated_output"
+  puts -e "$ttl_test_count assertions"
   if [ $ttl_fails = 0 ]; then
     green_text "Success"
     echo
     _ttl_unset_vars
     return 0
   else
-    red_text "Failures: $ttl_fails"
-    echo -e "$ttl_errors"
-    echo
+    red_text "Failures: $ttl_fails\n"
+    puts -ne "$ttl_errors"
     _ttl_unset_vars && return $ttl_fails
   fi
 }
@@ -327,7 +351,8 @@ assert_success() {
     if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
       ((ttl_fails++))
       ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
-      ttl_errors="$ttl_errors\n$(yellow_text "assert_success failure: <${*}>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}" && echo)"
+      [[ -v ASSERTION ]] && ttl_errors="$ttl_errors\n$(yellow_text "$ASSERTION")\n"
+      ttl_errors="$ttl_errors$(yellow_text "assert_success failure: <${*}>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}\n")"
       return 1
     else
       die "$(strip_ansi "assert_success failure: <${*}>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}")"
@@ -348,7 +373,8 @@ assert_failure() {
     if [ "$TTL_COLLECTING_TESTDATA" = "true" ]; then
       ((ttl_fails++))
       ttl_abbreviated_output="$ttl_abbreviated_output$(red_text "F")"
-      ttl_errors="$ttl_errors\n$(yellow_text "assert_failure was actually successful: <${*}>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}" && echo)"
+      [[ -v ASSERTION ]] && ttl_errors="$ttl_errors\n$(yellow_text "$ASSERTION")\n"
+      ttl_errors="$ttl_errors$(yellow_text "assert_failure was actually successful: <${*}>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}\n")"
       return 1
     else
       die "$(strip_ansi "assert_failure was actually successful: <${*}>\nstdout: ${outs[stdout]}\nstderr: ${outs[stderr]}\nretval: ${outs[retval]}")"

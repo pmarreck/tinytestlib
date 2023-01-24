@@ -1,73 +1,14 @@
 #!/usr/bin/env bash
 
-source tinytestlib
+source_relative() {
+  PATH="$(dirname "${BASH_SOURCE[0]}")" source "$1"
+}
+
+source_relative tinytestlib
 
 # Who tests the testers?? Obviously, the testers themselves test the testers!!
 _tinytestlib_test() {
-  begin_test_suite
-    local current_output
-    declare -A outs # this associative array will hold any state changes captured by "capture", below
-    # test basic assert_equal success
-    assert_equal "test with spaces" "test with spaces"
-    assert_equal "\"quoted 'stuff'\"" "\"quoted 'stuff'\""
-    # test basic assert_not_equal success
-    assert_not_equal "a a" "b b"
-    # test isatty
-    assert_failure isatty
-    current_output="$ttl_abbreviated_output"
-    export FAKE_TTY=1
-    assert_success isatty
-    capture outs assert_success isatty
-    unset FAKE_TTY
-    assert_equal "$ttl_abbreviated_output" "${current_output}\e[32m.\e[0m" # ensure green . has been added
-    assert "${outs[retval]}" == "0"
-    # test basic assert_equal success by capturing the stdout, stderr and returncode
-    current_output="$ttl_abbreviated_output"
-    capture outs assert_equal "test with spaces" "test with spaces"
-    assert "${outs[stdout]}" == ""
-    assert_equal "$ttl_abbreviated_output" "${current_output}." # ensure . has been added
-    assert "${outs[stderr]}" == ""
-    assert "${outs[retval]}" == "0"
-    # test basic assert_equal failure by capturing the stdout, stderr and returncode
-    current_output="$ttl_abbreviated_output"
-    capture outs assert_equal "good" "bad"
-    assert_equal "$ttl_abbreviated_output" "$current_output" # ensure nothing has been added
-    assert_equal "${outs[stderr]}" ""
-    assert_equal "${outs[retval]}" "1"
-    # test the hex encoder/decoder
-    local testencode testdecode teststring
-    teststring="	hello🐈ü🦊ß🐵"
-    testencode=$(hex_encode "$teststring")
-    testdecode=$(hex_decode "$testencode")
-    assert_equal "$teststring" "$testdecode"
-    # test regex matching
-    teststring="	hello🐈ü🦊ß🐵"
-    assert_match "$teststring" "🐈"
-    # I have 2 cats... that is more than enough 😊
-    assert_no_match "$teststring" "🐈🐈"
-    # test more complex regex matching
-    rx="^[[:blank:]]+hel{2}o🐈ü🦊ß🐵$"
-    assert_match "$teststring" "$rx"
-    # test success and failure assertions
-    assert_success date
-    assert_failure thisfilebetternotexist
-    # test generic "assert" call
-    assert "$teststring" == "	hello🐈ü🦊ß🐵"
-    assert "$teststring" = "	hello🐈ü🦊ß🐵"
-    assert "$teststring" !== "hello"
-    assert "$teststring" != "hello"
-    assert "$teststring" =~ "🐈"
-    assert "$teststring" !=~ "🐈🐈"
-    assert "$teststring" !~ "🐈🐈"
-    # test that capture requires an associative array; also test is_array function
-    assert_failure capture foo echo "yes"
-    assert_failure is_array foo
-    declare -a foo
-    assert_success is_array foo
-    # test ansi strip
-    assert_equal "$(strip_ansi $(yellow_text 'megatest'))" "megatest"
-  end_test_suite # this triggers the report output
-  
+  declare -A outs # this associative array will hold any state changes captured by "capture", below
   # test that non-testsuite asserts fail on failure
   assert_failure assert a = b
   # test that non-testsuite asserts succeed silently
@@ -75,7 +16,95 @@ _tinytestlib_test() {
   assert "${outs[stdout]}" == ""
   assert "${outs[stderr]}" == ""
   assert "${outs[retval]}" == "0"
+  begin_test_suite
+    local current_output
+    # test basic assert_equal success
+    ASSERTION="should assert_equal two equivalent strings" \
+    assert_equal "test with spaces" "test with spaces"
+    ASSERTION="should understand quotes" \
+    assert_equal "\"quoted 'stuff'\"" "\"quoted 'stuff'\""
+    # test basic assert_not_equal success
+    ASSERTION="should assert_not_equal two non-equivalent strings" \
+    assert_not_equal "a a" "b b"
+    # test isacolortty
+    ASSERTION="should return true for isacolortty" \
+    assert_success isacolortty
+    current_output="$ttl_abbreviated_output"
+    export FAKE_NOCOLORTTY=1
+    ASSERTION="should return false for isacolortty when FAKE_NOCOLORTTY is set" \
+    assert_failure isacolortty
+    capture outs assert_failure isacolortty
+    unset FAKE_NOCOLORTTY
+    ASSERTION="should ensure non-ANSI period has been added when not a color tty" \
+    assert_equal "$ttl_abbreviated_output" "${current_output}." # ensure non-ansi . has been added
+    ASSERTION="should return code 0" \
+    assert "${outs[retval]}" == "0"
+    ttl_abbreviated_output="${current_output}\e[32m.\e[0m"
+    # test basic assert_equal success by capturing the stdout, stderr and returncode
+    current_output="$ttl_abbreviated_output"
+    capture outs assert_equal "test with spaces" "test with spaces"
+    ASSERTION="stdout should be empty" \
+    assert "${outs[stdout]}" == ""
+    ASSERTION="should output a green color period" \
+    assert_equal "$ttl_abbreviated_output" "${current_output}\e[32m.\e[0m" # ensure . has been added
+    assert "${outs[stderr]}" == ""
+    assert "${outs[retval]}" == "0"
+    # test basic assert_equal failure by capturing the stdout, stderr and returncode
+    current_output="$ttl_abbreviated_output"
+    capture outs assert_equal "good" "bad"
+    ASSERTION="should add nothing to output when output is captured" \
+    assert_equal "$ttl_abbreviated_output" "$current_output" # ensure nothing has been added
+    assert_equal "${outs[stderr]}" ""
+    assert_equal "${outs[retval]}" "1"
+    # test the hex encoder/decoder
+    local testencode testdecode teststring
+    teststring="	hello🐈ü🦊ß🐵"
+    testencode=$(binhex "$teststring")
+    testdecode=$(hexbin "$testencode")
+    ASSERTION="should encode and decode to the same text" \
+    assert_equal "$teststring" "$testdecode"
+    # test regex matching
+    ASSERTION="should regex match" \
+    assert_match "$teststring" "🐈"
+    # I have 2 cats... that is more than enough 😊
+    ASSERTION="should not regex match" \
+    assert_no_match "$teststring" "🐈🐈"
+    # test more complex regex matching
+    rx="^[[:blank:]]+hel{2}o🐈ü🦊ß🐵$"
+    ASSERTION="should complex regex match" \
+    assert_match "$teststring" "$rx"
+    # test success and failure assertions
+    ASSERTION="should succeed on simple call to 'date'" \
+    assert_success date
+    ASSERTION="should fail on nonexistent file" \
+    assert_failure thisfilebetternotexist
+    # test generic "assert" call
+    ASSERTION="should understand == comparison" \
+    assert "$teststring" == "	hello🐈ü🦊ß🐵"
+    ASSERTION="should understand = comparison" \
+    assert "$teststring" = "	hello🐈ü🦊ß🐵"
+    ASSERTION="should understand !== comparison" \
+    assert "$teststring" !== "hello"
+    ASSERTION="should understand != comparison" \
+    assert "$teststring" != "hello"
+    ASSERTION="should understand =~ comparison" \
+    assert "$teststring" =~ "🐈"
+    ASSERTION="should understand !=~ comparison" \
+    assert "$teststring" !=~ "🐈🐈"
+    ASSERTION="should understand !~ comparison" \
+    assert "$teststring" !~ "🐈🐈"
+    # test that capture requires an associative array; also test is_array function
+    assert_failure capture foo echo "yes"
+    assert_failure is_array foo
+    declare -a foo
+    ASSERTION="is_array should succeed when argument is an array" \
+    assert_success is_array foo
+    # test ansi strip
+    ASSERTION="strip_ansi should strip ANSI" \
+    assert_equal "$(strip_ansi $(yellow_text 'megatest'))" "megatest"
+  end_test_suite # this triggers the report output
 }
 
 _tinytestlib_test
+
 unset _tinytestlib_test
