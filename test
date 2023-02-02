@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 source_relative() {
-  PATH="$(dirname "${BASH_SOURCE[0]}")" source "$1"
+  PATH="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )" source "$1"
 }
 
 source_relative tinytestlib

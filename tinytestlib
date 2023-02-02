@@ -27,15 +27,17 @@ isacolortty() {
 
 # echo has nonstandard behavior, so...
 puts() {
-  local print_fmt end_fmt print_spec newline
+  local print_fmt end_fmt print_spec fd newline
   print_spec='%s'
   newline='\n'
   end_fmt='\e[0m'
+  fd='1'
   while true; do
     case "${1}" in
       (--green)   print_fmt='\e[32m' ;;
       (--yellow)  print_fmt='\e[93m' ;;
       (--red)     print_fmt='\e[31m' ;;
+      (--stderr)  fd='2' ;;
       (-n)        newline='' ;;
       (-e)        print_spec='%b' ;;
       (-en|-ne)   print_spec='%b'; newline='' ;;
@@ -50,49 +52,57 @@ puts() {
   isacolortty || unset -v print_fmt end_fmt
 
   # shellcheck disable=SC2059
-  printf -- "${print_fmt}${print_spec}${end_fmt}${newline}" "${*}"
+  printf -- "${print_fmt}${print_spec}${end_fmt}${newline}" "${*}" >&$fd
 }
 
 # ANSI color helpers
 red_text() {
-  puts --red -en "${1}"
+  puts --red -en "$*"
 }
 
 green_text() {
-  puts --green -en "${1}"
+  puts --green -en "$*"
 }
 
 yellow_text() {
-  puts --yellow -en "${1}"
+  puts --yellow -en "$*"
 }
 
+# add binhex command to dump hex from stdin or args (note that hexdump also exists)
+# usage: echo "peter" | binhex
+# or: binhex peter
 binhex() {
-  if [ -z "$1" ]; then
+  if [ -z "$1" ]; then # if no arguments
+    # The following exits code 0 if stdin not empty; 1 if empty; does not consume any bytes.
+    # This may only be a Bash-ism, FYI. Not sure if it's shell-portable.
+    # read -t 0
+    # retval=${?##1} # replace 1 with blank so it falses correctly if stdin is empty
     if read -t 0; then
-      xxd -pu;
-    else
-      echo "Encodes binary data to hexadecimal."
-      echo "Usage: binhex <string>";
-      echo "    (or pipe something to binhex)";
-      echo "This function is defined in ${BASH_SOURCE[0]}";
-    fi;
-  else
-    printf "%b" "$1" | xxd -pu;
+      xxd -pu  # receive piped input from stdin
+    else # if stdin is empty AND no arguments
+      echo "Usage: binhex <string>"
+      echo "       (or pipe something to binhex)"
+      echo "This function is defined in ${BASH_SOURCE[0]}"
+    fi
+  else # if arguments
+    printf "%b" "$1" | xxd -pu # pipe all arguments to xxd
   fi
 }
 
+# convert hex back to binary
 hexbin() {
-  if [ -z "$1" ]; then
+  if [ -z "$1" ]; then # if no arguments
+    # The following exits code 0 if stdin not empty; 1 if empty; does not consume any bytes.
+    # This may only be a Bash-ism, FYI. Not sure if it's shell-portable.
     if read -t 0; then
-      xxd -r -p;
-    else
-      echo "Decodes hexadecimal data to binary data."
-      echo "Usage: hexbin <hex string>";
-      echo "    (or pipe something to hexbin)";
-      echo "This function is defined in ${BASH_SOURCE[0]}";
-    fi;
-  else
-    printf "%b" "$1" | xxd -r -p;
+      xxd -r -p   # receive piped input from stdin
+    else # if stdin is empty AND no arguments
+      echo "Usage: hexbin <hex string>"
+      echo "       (or pipe something to hexbin)"
+      echo "This function is defined in ${BASH_SOURCE[0]}"
+    fi
+  else # if arguments
+    printf "%b" "$1" | xxd -r -p  # pipe all arguments to xxd
   fi
 }
 
